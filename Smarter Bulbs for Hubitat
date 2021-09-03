@@ -1,0 +1,124 @@
+/*
+ *	Smarter Bulbs for Hubitat
+ *	Modifications by Toby Harris - 9/3/2021
+ *
+ *  Original author: nsweet68
+*/
+
+definition(
+	name: "Smarter Bulbs",
+	namespace: "tobycth3",
+	author: "Toby Harris",
+	description: "",
+	category: "",
+	iconUrl: "",
+	iconX2Url: ""
+)
+preferences {
+	section("Settings") {
+        input "canary", "capability.switch", title: "Bulb to indicate power failure"
+        input "monitors","capability.switch", multiple: true, title: "Bulbs to restore state"
+		input "debugEnable", "bool", title: "Enable debug logging?"
+	}
+}
+
+def installed() {
+    if(debugEnable) log.debug "Installed with settings: ${settings}"
+    initialize()
+}
+
+def updated() {
+    if(debugEnable) log.debug "Updated with settings: ${settings}"
+    unsubscribe()
+    initialize()
+}
+
+def initialize() {
+	subscribe(location, "systemStart", checkRestore)
+//  subscribe(monitors, "switch", saveStates)
+    subscribe(canary,"switch.on", checkRestore)
+    pollCanary()
+    saveStates() 
+	runEvery5Minutes(checkRestore)
+	if(debugEnable) runIn(1800,logsOff)    
+}
+
+def saveStates(evt) {
+	if(debugEnable) log.debug "Checking States"
+    if ("off" == canary.currentSwitch ) {
+    	def lightsOff = [:]
+    	def lightsOn = [:]
+    	monitors?.each {
+			if (it.currentSwitch == "off"){
+        	if(debugEnable) log.debug "${it.displayName} value ${it.currentSwitch}" 
+        	lightsOff[it.id]="off"
+        	}
+			if (it.currentSwitch == "on"){
+        	if(debugEnable) log.debug "${it.displayName} value ${it.currentSwitch}" 
+        	lightsOn[it.id]="on"
+        	}
+		}
+   	state.lOff = lightsOff
+   	state.lOn = lightsOn
+	}
+}
+
+def checkRestore(evt) {
+    if(debugEnable) log.debug "Checking Restore"  
+    pollCanary() 
+    if(debugEnable) log.debug "Canary is ${canary.currentSwitch}"
+    if ("on" == canary.currentSwitch) { 
+    	if(debugEnable) log.debug "Turning stuff off"
+        restoreState()
+        canary.off()
+        }
+    pollmonitors()
+    saveStates(evt)
+}
+
+private restoreState() {
+  monitors?.each {
+				if (state.lOff[it.id] == "off") {
+                if(debugEnable) log.debug "turning $it.label off"
+				it.off()
+                }
+				if (state.lOn[it.id] == "on") {
+                if(debugEnable) log.debug "turning $it.label on"
+				it.on()
+                }
+			}
+		}
+
+private pollCanary() {
+    def hasPoll = canary.hasCommand("poll")
+    if (hasPoll) {
+    	canary.poll()
+        if(debugEnable) log.debug "Poll canary"
+    }
+    else
+    {
+    	canary.refresh()
+        if(debugEnable) log.debug "Refresh canary"
+    }
+}
+
+private pollmonitors() {
+
+monitors.each {monitor ->
+def hasPoll = monitor.hasCommand("poll")
+    if (hasPoll) {
+    	monitor.poll()
+        if(debugEnable) log.debug "Poll ${monitor.displayName}"
+    }
+    else
+    {
+    	monitor.refresh()
+        if(debugEnable) log.debug "Refresh ${monitor.displayName}"
+    }
+}
+    
+}
+
+void logsOff(){
+     device.updateSetting("debugEnable",[value:"false",type:"bool"])
+}
